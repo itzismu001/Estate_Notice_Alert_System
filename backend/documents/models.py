@@ -1,3 +1,4 @@
+
 from django.db import models
 from sources.models import Source
 
@@ -137,3 +138,73 @@ class DocumentPage(models.Model):
 
     def __str__(self):
         return f"Document {self.document_id} - Page {self.page_number}"
+
+
+class ProcessingJob(models.Model):
+
+    class JobType(models.TextChoices):
+        TEXT_EXTRACTION = "TEXT_EXTRACTION", "Text Extraction"
+        OCR = "OCR", "OCR Processing"
+        NOTICE_DETECTION = "NOTICE_DETECTION", "Notice Detection"
+        DETAIL_EXTRACTION = "DETAIL_EXTRACTION", "Notice Detail Extraction"
+
+    class Status(models.TextChoices):
+        PENDING = "PENDING", "Pending"
+        RUNNING = "RUNNING", "Running"
+        COMPLETED = "COMPLETED", "Completed"
+        FAILED = "FAILED", "Failed"
+
+    document = models.ForeignKey(
+        SourceDocument,
+        on_delete=models.CASCADE,
+        related_name="processing_jobs"
+    )
+
+    page = models.ForeignKey(
+        DocumentPage,
+        on_delete=models.CASCADE,
+        related_name="processing_jobs",
+        blank=True,
+        null=True
+    )
+
+    job_type = models.CharField(
+        max_length=30,
+        choices=JobType.choices
+    )
+
+    status = models.CharField(
+        max_length=20,
+        choices=Status.choices,
+        default=Status.PENDING
+    )
+
+    retry_count = models.PositiveIntegerField(default=0)
+    max_retries = models.PositiveIntegerField(default=3)
+
+    celery_task_id = models.CharField(
+        max_length=255,
+        blank=True
+    )
+
+    started_at = models.DateTimeField(
+        blank=True,
+        null=True
+    )
+
+    completed_at = models.DateTimeField(
+        blank=True,
+        null=True
+    )
+
+    error_message = models.TextField(blank=True)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "processing_jobs"
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return f"{self.job_type} - Document {self.document_id}"

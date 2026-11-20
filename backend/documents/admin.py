@@ -1,5 +1,5 @@
 from django.contrib import admin
-from .models import SourceDocument, DocumentPage
+from .models import SourceDocument, DocumentPage, ProcessingJob
 
 
 @admin.register(SourceDocument)
@@ -64,3 +64,36 @@ class DocumentPageAdmin(admin.ModelAdmin):
     )
 
     ordering = ("document", "page_number")
+
+
+@admin.register(ProcessingJob)
+class ProcessingJobAdmin(admin.ModelAdmin):
+
+    list_display = (
+        "id",
+        "document",
+        "page",
+        "job_type",
+        "status",
+        "retry_count",
+        "max_retries",
+        "created_at",
+    )
+
+    list_filter = (
+        "job_type",
+        "status",
+    )
+
+    search_fields = (
+        "document__title",
+        "celery_task_id",
+        "error_message",
+    )
+
+    readonly_fields = (
+        "created_at",
+        "updated_at",
+    )
+
+    ordering = ("-created_at",)
