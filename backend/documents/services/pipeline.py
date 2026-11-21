@@ -1,3 +1,4 @@
+
 from documents.services.pdf_extractor import extract_pdf_text
 from documents.services.ocr_processor import process_ocr_pages
 from notices.services.notice_processor import process_notice
@@ -33,6 +34,9 @@ def process_pdf(pdf_path):
         notice_result = process_notice(text)
         boxes = detect_notice_boxes(pdf_path, page_number)
 
+        for box in boxes:
+            box["notice_result"] = process_notice(box["text"])
+
         final_pages.append({
             "page_number": page_number,
             "method": method,
@@ -46,3 +50,4 @@ def process_pdf(pdf_path):
         "pages": final_pages,
         "ocr_processed_pages": len(ocr_pages),
     }
+
