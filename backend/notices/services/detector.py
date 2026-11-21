@@ -1,32 +1,55 @@
-import re
-
-
 NOTICE_TERMS = [
     "public notice",
     "legal notice",
-    "court notice",
     "notice to the public",
 ]
 
 PROPERTY_TERMS = [
     "land",
-    "property",
+    "said land",
+    "said property",
+    "immovable property",
     "survey number",
     "survey no",
     "plot number",
     "plot no",
     "village",
-    "immovable property",
+    "property",
 ]
 
 LEGAL_TERMS = [
     "claim",
     "objection",
-    "legal heirs",
     "ownership",
-    "title deed",
+    "title",
     "sale deed",
+    "sale transaction",
+    "proposed sale",
+    "transfer",
     "mortgage",
+    "legal heirs",
+    "encumbrance",
+    "right, title",
+]
+
+ESTATE_CONTEXT_TERMS = [
+    "owner",
+    "absolute owner",
+    "right, title and interest",
+    "sale transaction",
+    "proposed sale",
+    "transfer",
+    "conveyance",
+    "property documents",
+]
+
+IRRELEVANT_TERMS = [
+    "e-tender",
+    "tender documents",
+    "earnest money",
+    "bid submission",
+    "technical bid",
+    "recruitment",
 ]
 
 
@@ -45,25 +68,27 @@ def detect_notice(text):
         term for term in LEGAL_TERMS if term in text_lower
     ]
 
+    matched_estate_terms = [
+        term for term in ESTATE_CONTEXT_TERMS if term in text_lower
+    ]
+
+    matched_irrelevant_terms = [
+        term for term in IRRELEVANT_TERMS if term in text_lower
+    ]
+
     score = (
-        len(matched_notice_terms) * 30
-        + len(matched_property_terms) * 15
+        len(matched_property_terms) * 15
         + len(matched_legal_terms) * 10
+        + len(matched_estate_terms) * 20
     )
 
-    score = min(score, 100)
-
-    if not matched_notice_terms or not matched_property_terms:
+    if matched_irrelevant_terms and len(matched_estate_terms) < 2:
         classification = "NOT_RELEVANT"
         confidence = "LOW"
 
-    elif score >= 70:
+    elif len(matched_property_terms) >= 1 and len(matched_estate_terms) >= 1:
         classification = "ESTATE_PROPERTY_NOTICE"
-        confidence = "HIGH"
-
-    elif score >= 45:
-        classification = "ESTATE_PROPERTY_NOTICE"
-        confidence = "MEDIUM"
+        confidence = "HIGH" if score >= 70 else "MEDIUM"
 
     else:
         classification = "NOT_RELEVANT"
@@ -73,8 +98,10 @@ def detect_notice(text):
         "is_notice": classification == "ESTATE_PROPERTY_NOTICE",
         "notice_type": classification,
         "confidence": confidence,
-        "score": score,
+        "score": min(score, 100),
         "matched_notice_terms": matched_notice_terms,
         "matched_property_terms": matched_property_terms,
         "matched_legal_terms": matched_legal_terms,
+        "matched_estate_terms": matched_estate_terms,
+        "matched_irrelevant_terms": matched_irrelevant_terms,
     }
