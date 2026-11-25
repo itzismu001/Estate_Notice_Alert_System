@@ -2,118 +2,577 @@
 import re
 
 
+# ==================================================
+# COMMON EXTRACTION UTILITIES
+# ==================================================
+
 def find_value(patterns, text):
+
     for pattern in patterns:
-        match = re.search(pattern, text, re.IGNORECASE)
+
+        match = re.search(
+            pattern,
+            text,
+            re.IGNORECASE
+        )
+
         if match:
-            return re.sub(r"\s+", " ", match.group(1)).strip()
+
+            value = re.sub(
+                r"\s+",
+                " ",
+                match.group(1)
+            ).strip()
+
+            return value or None
+
     return None
 
 
-def find_party_names(text):
-    clean_text = re.sub(r"\s+", " ", text)
+def unique_values(values):
 
-    # Case 1: Multiple numbered owners
+    result = []
+    seen = set()
+
+    for value in values:
+
+        value = value.strip()
+        key = value.casefold()
+
+        if value and key not in seen:
+
+            seen.add(key)
+            result.append(value)
+
+    return result
+
+
+def first_value(values):
+
+    return values[0] if values else None
+
+
+# ==================================================
+# PROPERTY IDENTIFIER EXTRACTION
+# ==================================================
+
+IDENTIFIER_LABELS = {
+
+    "survey_numbers": (
+        r"(?:survey|sy\.?)\s*"
+        r"(?:numbers?|nos?\.?)"
+    ),
+
+    "subdivision_numbers": (
+        r"(?:sub[\s-]?division)\s*"
+        r"(?:numbers?|nos?\.?)?"
+    ),
+
+    "plot_numbers": (
+        r"plot\s*(?:numbers?|nos?\.?)"
+    ),
+
+    "site_numbers": (
+        r"site\s*(?:numbers?|nos?\.?)"
+    ),
+
+    "hissa_numbers": (
+        r"hissa\s*(?:numbers?|nos?\.?)"
+    ),
+
+    "khata_numbers": (
+        r"(?:khata|katha)\s*"
+        r"(?:numbers?|nos?\.?)"
+    ),
+
+    "property_numbers": (
+        r"property\s*(?:numbers?|nos?\.?)"
+    ),
+
+    "pid_numbers": (
+        r"pid\s*(?:numbers?|nos?\.?)?"
+    ),
+
+    "tp_numbers": (
+        r"(?:tp|town\s+planning)\s*"
+        r"(?:numbers?|nos?\.?)"
+    ),
+
+    "municipal_numbers": (
+        r"municipal\s*(?:numbers?|nos?\.?)"
+    ),
+
+    "flat_numbers": (
+        r"flat\s*(?:numbers?|nos?\.?)"
+    ),
+
+    "khasra_numbers": (
+        r"khasra\s*(?:numbers?|nos?\.?)"
+    ),
+
+    "document_numbers": (
+        r"document\s*(?:numbers?|nos?\.?)"
+    ),
+
+}
+
+
+# Identifiers must contain a numeric component.
+IDENTIFIER_VALUE = (
+    r"[A-Za-z]?\d+"
+    r"(?:[/-][A-Za-z0-9]+)*"
+    r"[A-Za-z]?"
+)
+
+
+def extract_identifiers(text, label_pattern):
+
+    values = []
+
+    pattern = (
+        r"\b"
+        + label_pattern
+        + r"\s*[:\-]?\s*"
+        + r"(" + IDENTIFIER_VALUE + r")"
+    )
+
+    for match in re.finditer(
+        pattern,
+        text,
+        re.IGNORECASE
+    ):
+
+        values.append(match.group(1))
+
+        # Look for additional identifiers
+        # separated by commas, "and", or "&".
+
+        remaining = text[match.end():]
+
+        continuation = (
+            r"^\s*(?:,|;|and\b|&)\s*"
+            r"(" + IDENTIFIER_VALUE + r")"
+        )
+
+        while remaining:
+
+            next_match = re.match(
+                continuation,
+                remaining,
+                re.IGNORECASE
+            )
+
+            if not next_match:
+                break
+
+            values.append(
+                next_match.group(1)
+            )
+
+            remaining = remaining[
+                next_match.end():
+            ]
+
+    return unique_values(values)
+
+
+# ==================================================
+# KHASRA NUMBER EXTRACTION
+# ==================================================
+
+def extract_khasra_numbers(text):
+
+    values = []
+
+    label = (
+        r"\bkhasra\s*"
+        r"(?:numbers?|nos?\.?)"
+        r"\s*[:\-]?\s*"
+    )
+
+    for match in re.finditer(
+        label,
+        text,
+        re.IGNORECASE
+    ):
+
+        remaining = text[match.end():]
+
+        # Khasra numbers may contain "min"
+        # and land measurement annotations.
+
+        entry_pattern = (
+            r"^\s*"
+            r"(" + IDENTIFIER_VALUE + r")"
+            r"\s*(?:min\b)?"
+            r"\s*(?:\([^)]*\))?"
+        )
+
+        while remaining:
+
+            entry = re.match(
+                entry_pattern,
+                remaining,
+                re.IGNORECASE
+            )
+
+            if not entry:
+                break
+
+            values.append(entry.group(1))
+
+            remaining = remaining[entry.end():]
+
+            separator = re.match(
+                r"^\s*(?:,|;|and\b|&)\s*",
+                remaining,
+                re.IGNORECASE
+            )
+
+            if not separator:
+                break
+
+            remaining = remaining[
+                separator.end():
+            ]
+
+    return unique_values(values)
+
+
+# ==================================================
+# LOCATION EXTRACTION
+# ==================================================
+
+def extract_location(text, label_pattern):
+
+    pattern = (
+        r"\b(?:"
+        + label_pattern
+        + r")\b"
+        + r"[ \t]*[:\-]?[ \t]*"
+        + r"([A-Za-z][A-Za-z .'-]*?)"
+        + r"(?="
+        + r",|;|\n|$"
+        + r"|\s+(?:"
+        + r"taluk|taluka|tehsil|tahsil|"
+        + r"district|hobli|state|"
+        + r"situated|bearing|measuring|"
+        + r"survey|raise|government|govt|"
+        + r"karnataka|haryana"
+        + r")\b)"
+    )
+
+    value = find_value(
+        [pattern],
+        text
+    )
+
+    if value:
+        return value.rstrip(" .")
+
+    return None
+
+
+# ==================================================
+# PARTY NAME EXTRACTION
+# ==================================================
+
+def find_party_names(text):
+
+    clean_text = re.sub(
+        r"\s+",
+        " ",
+        text
+    )
+
+    # Case 1: Multiple numbered owners.
+
     owner_section = re.search(
-        r"owners?\s*\(1\)(.*?)(?=both resident|resident of|Any entity|Any person)",
+        r"owners?\s*\(1\)(.*?)"
+        r"(?=both resident|resident of|"
+        r"Any entity|Any person)",
         clean_text,
         re.IGNORECASE
     )
 
     if owner_section:
+
         matches = re.findall(
-            r"\(\d+\)\s*(?:Mr\.?|Mrs\.?|Ms\.?)?\s*"
-            r"([A-Z][A-Za-z]+(?:\s+[A-Z][A-Za-z]+)*)"
+            r"\(\d+\)\s*"
+            r"(?:Mr\.?|Mrs\.?|Ms\.?)?\s*"
+            r"([A-Z][A-Za-z]+"
+            r"(?:\s+[A-Z][A-Za-z]+)*)"
             r"(?=\s+(?:D/o|S/o|both resident))",
             owner_section.group(0),
             re.IGNORECASE
         )
 
         if matches:
-            return [name.strip() for name in matches]
 
-    # Case 2: Numbered sellers
+            return unique_values(matches)
+
+    # Case 2: Numbered sellers.
+
     seller_section = re.search(
-        r"from\s*\[1\](.*?)(?=The aforesaid persons)",
+        r"from\s*\[1\](.*?)"
+        r"(?=The aforesaid persons)",
         clean_text,
         re.IGNORECASE
     )
 
     if seller_section:
+
         matches = re.findall(
-            r"\[\d+\]\s*SHRI\s+(.+?)(?=,\s*S/o)",
+            r"\[\d+\]\s*SHRI\s+"
+            r"(.+?)(?=,\s*S/o)",
             seller_section.group(0),
             re.IGNORECASE
         )
 
         if matches:
-            return [name.strip().title() for name in matches]
 
-    # Case 3: Name after belonging to
+            return unique_values([
+                name.strip().title()
+                for name in matches
+            ])
+
+    # Case 3: Name after "belonging to".
+
     match = re.search(
-        r"belonging to\s+(.+?)(?:,\s*have|\s+have)",
+        r"belonging to\s+(.+?)"
+        r"(?:,\s*have|\s+have)",
         clean_text,
         re.IGNORECASE
     )
 
     if match:
+
         return [match.group(1).strip()]
 
-    # Case 4: Name from notice signature
+    # Case 4: Explicit absolute owner.
+
     match = re.search(
-        r"\n\s*([A-Z][A-Z ]{3,})\s*\n\s*D-\d+",
-        text
+        r"(?:absolute|lawful|registered)"
+        r"\s+owner\s+"
+        r"(?:Mr\.?|Mrs\.?|Ms\.?|Shri)?\s*"
+        r"([A-Za-z][A-Za-z .'-]+?)"
+        r"(?=\s+(?:S/o|D/o|W/o|"
+        r"residing|resident)|,)",
+        clean_text,
+        re.IGNORECASE
     )
 
     if match:
-        return [match.group(1).strip().title()]
+
+        return [match.group(1).strip()]
+
+    # A signature alone does not establish
+    # whether the person owns the property.
 
     return None
 
 
+# ==================================================
+# ADVOCATE NAME EXTRACTION
+# ==================================================
+
+def find_advocate_name(text):
+
+    return find_value([
+
+        r"(?:^|\n)[ \t]*"
+        r"([A-Za-z][A-Za-z .'-]{3,60})"
+        r"[ \t]*\n[ \t]*Advocate\b",
+
+        r"\bAdvocate[ \t]*[:\-][ \t]*"
+        r"([A-Za-z][A-Za-z .'-]+)"
+
+    ], text)
+
+
+# ==================================================
+# DATE AND DEADLINE EXTRACTION
+# ==================================================
+
+DATE_PATTERN = (
+    r"\d{1,2}[./-]"
+    r"\d{1,2}[./-]"
+    r"\d{2,4}"
+)
+
+
+def extract_publication_date(text):
+
+    return find_value([
+
+        r"\b(?:date of publication|published on)"
+        r"\s*[:\-]?\s*("
+        + DATE_PATTERN + r")"
+
+    ], text)
+
+
+def extract_notice_date(text):
+
+    return find_value([
+
+        r"(?:^|\n)[ \t]*"
+        r"(?:notice date|date|dated)"
+        r"[ \t]*[:\-]?[ \t]*("
+        + DATE_PATTERN + r")"
+
+    ], text)
+
+
+def extract_response_deadline(text):
+
+    pattern = (
+        r"\bwithin\s+"
+        r"(?:a\s+period\s+of\s+)?"
+        r"(\d+)\s*"
+        r"(?:\([^)]+\)\s*)?"
+        r"(days?|weeks?|months?)\b"
+    )
+
+    match = re.search(
+        pattern,
+        text,
+        re.IGNORECASE
+    )
+
+    if not match:
+
+        return None, None
+
+    value = match.group(1)
+    unit = match.group(2).lower().rstrip("s")
+
+    return value, unit
+
+
+# ==================================================
+# MAIN STRUCTURED FIELD EXTRACTOR
+# ==================================================
+
 def extract_notice_fields(text):
 
+    text = text or ""
+
+    identifiers = {}
+
+    for field_name, label_pattern in (
+        IDENTIFIER_LABELS.items()
+    ):
+
+        identifiers[field_name] = (
+            extract_identifiers(
+                text,
+                label_pattern
+            )
+        )
+
+    identifiers["khasra_numbers"] = (
+        extract_khasra_numbers(text)
+    )
+
+    deadline, deadline_unit = (
+        extract_response_deadline(text)
+    )
+
+    # Preserve existing scalar fields for
+    # compatibility with the current pipeline.
+
     fields = {
+
         "party_names": find_party_names(text),
 
-        "village": find_value([
-            r"village\s+([A-Za-z ]+?)(?=,|\s+Tehsil|\s+Taluk|\s+District)",
-            r"village\s*[:\-]?\s*([A-Za-z ]+)",
-        ], text),
+        "village": extract_location(
+            text,
+            r"villages?"
+        ),
 
-        "taluk": find_value([
-            r"(?:taluk|taluka|tehsil)\s+([A-Za-z ]+?)(?=,|\s+New Delhi|\s+District)",
-            r"(?:taluk|taluka|tehsil)\s*[:\-]?\s*([A-Za-z ]+)",
-        ], text),
+        "taluk": extract_location(
+            text,
+            r"taluk|taluka|tehsil|tahsil"
+        ),
 
-        "district": find_value([
-            r"district\s*[:\-]?\s*([A-Za-z ]+)",
-        ], text),
+        "district": extract_location(
+            text,
+            r"district|dist\.?"
+        ),
 
-        "survey_number": find_value([
-            r"(?:survey\s*(?:no\.?|number)|sy\.?\s*no\.?)\s*[:\-]?\s*([\d/-]+)",
-        ], text),
+        "hobli": extract_location(
+            text,
+            r"hobli"
+        ),
 
-        "subdivision_number": find_value([
-            r"(?:subdivision|sub-division)\s*(?:no\.?|number)?\s*[:\-]?\s*([\d/,-]+)",
-        ], text),
+        "survey_number": first_value(
+            identifiers["survey_numbers"]
+        ),
 
-        "plot_number": find_value([
-            r"(?:plot\s*(?:no\.?|number))\s*[:\-]?\s*([\w/-]+)",
-        ], text),
+        "subdivision_number": first_value(
+            identifiers["subdivision_numbers"]
+        ),
 
-        "tp_number": find_value([
-            r"(?:tp\s*(?:no\.?|number)|town planning number)\s*[:\-]?\s*([\w/-]+)",
-        ], text),
+        "plot_number": first_value(
+            identifiers["plot_numbers"]
+        ),
 
-        "publication_date": find_value([
-            r"(?:date of publication|published on|date)\s*[:\-]?\s*(\d{1,2}[./-]\d{1,2}[./-]\d{2,4})",
-        ], text),
+        "tp_number": first_value(
+            identifiers["tp_numbers"]
+        ),
 
-        "response_deadline": find_value([
-            r"within\s+(?:a\s+period\s+of\s+)?(\d+)\s*(?:\([^)]+\)\s*)?days",
-        ], text),
+        "site_number": first_value(
+            identifiers["site_numbers"]
+        ),
+
+        "hissa_number": first_value(
+            identifiers["hissa_numbers"]
+        ),
+
+        "khata_number": first_value(
+            identifiers["khata_numbers"]
+        ),
+
+        "property_number": first_value(
+            identifiers["property_numbers"]
+        ),
+
+        "pid_number": first_value(
+            identifiers["pid_numbers"]
+        ),
+
+        "municipal_number": first_value(
+            identifiers["municipal_numbers"]
+        ),
+
+        "flat_number": first_value(
+            identifiers["flat_numbers"]
+        ),
+
+        "khasra_number": first_value(
+            identifiers["khasra_numbers"]
+        ),
+
+        "publication_date": (
+            extract_publication_date(text)
+        ),
+
+        "notice_date": (
+            extract_notice_date(text)
+        ),
+
+        "response_deadline": deadline,
+
+        "response_deadline_unit": deadline_unit,
+
+        "advocate_name": find_advocate_name(text),
+
     }
+
+    # Include complete lists of identifiers.
+
+    fields.update(identifiers)
 
     return fields
 
