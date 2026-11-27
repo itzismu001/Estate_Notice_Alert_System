@@ -359,4 +359,3 @@ def detect_notice_boxes(pdf_path, page_number):
                     })
 
     return results
-

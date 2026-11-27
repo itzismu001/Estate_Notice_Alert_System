@@ -116,4 +116,3 @@ def extract_notice_fields(text):
     }
 
     return fields
-

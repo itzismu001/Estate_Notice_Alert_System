@@ -50,4 +50,3 @@ def process_pdf(pdf_path):
         "pages": final_pages,
         "ocr_processed_pages": len(ocr_pages),
     }
-
