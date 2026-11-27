@@ -39,3 +39,5 @@ Thumbs.db
 .pytest_cache/
 .coverage
 htmlcov/
+# Celery Beat runtime files
+celerybeat-schedule*
