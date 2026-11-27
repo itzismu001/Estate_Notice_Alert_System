@@ -82,7 +82,32 @@ def extract_page_metadata(pdf_path):
 # MAIN PDF PROCESSING PIPELINE
 # ==================================================
 
-def process_pdf(pdf_path):
+def process_pdf(
+    pdf_path,
+    multilingual=False,
+    selected_pages=None,
+    validate_secondary=True,
+    force_region_ocr=False,
+):
+
+    if multilingual:
+
+        from documents.services.multilingual_pipeline import (
+            process_multilingual_pdf,
+        )
+
+        return process_multilingual_pdf(
+            pdf_path,
+            selected_pages=selected_pages,
+            validate_secondary=validate_secondary,
+            force_region_ocr=force_region_ocr,
+        )
+
+    if selected_pages is not None or force_region_ocr:
+        raise ValueError(
+            "These options require multilingual=True"
+        )
+
 
     # STEP 1: Extract selectable PDF text.
 

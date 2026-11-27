@@ -2,4 +2,25 @@ __pycache__/
 *.py[cod]
 venv/
 .env
-test_files/
+# Local processing files
+test_files/*
+
+# Permanent regression tests
+!test_files/regression_tests/
+test_files/regression_tests/*
+!test_files/regression_tests/test_*.py
+
+# Small synthetic PDF fixtures
+!test_files/sample_notice.pdf
+!test_files/sample_multiple_notices.pdf
+
+# Generated scanned fixture
+test_files/sample_multiple_notices_scanned.pdf
+
+# Local backups
+*.backup
+*.baseline
+*.pre_*
+
+!test_files/regression_tests/generate_pdf_fixtures.py
+!test_files/regression_tests/run_regression_tests.py

@@ -4,6 +4,10 @@ import re
 
 from django.db import transaction
 
+from notices.services.evidence_persistence import (
+    save_extraction_evidence,
+)
+
 from documents.models import SourceDocument, DocumentPage
 from notices.models import Notice, NoticeEntity, NoticePage
 
@@ -434,6 +438,8 @@ def save_document_pages(
         "notices_skipped_existing": 0,
         "reviewed_notices_skipped": 0,
         "entities_created": 0,
+        "evidence_created": 0,
+        "evidence_skipped_existing": 0,
     }
 
     for page_data in pipeline_result["pages"]:
@@ -485,12 +491,26 @@ def save_document_pages(
             defaults.update({
                 "page_type": page_type,
 
-                "extracted_text": (
+                "extracted_text": page_data.get(
+                    "direct_text",
                     text if method == "direct" else ""
                 ),
 
-                "ocr_text": (
+                "ocr_text": page_data.get(
+                    "ocr_text",
                     text if method == "ocr" else ""
+                ),
+
+                "page_width": (
+                    round(page_data["page_width"])
+                    if page_data.get("page_width")
+                    else None
+                ),
+
+                "page_height": (
+                    round(page_data["page_height"])
+                    if page_data.get("page_height")
+                    else None
                 ),
             })
 
@@ -527,7 +547,14 @@ def save_document_pages(
                 "detection"
             ) or {}
 
-            if not detection.get("is_notice"):
+            multilingual = (
+                "retain_candidate" in notice_result
+            )
+
+            if multilingual:
+                if not notice_result["retain_candidate"]:
+                    continue
+            elif not detection.get("is_notice"):
                 continue
 
             bbox = validate_normalized_bbox(
@@ -583,8 +610,10 @@ def save_document_pages(
 
                 notice_text=notice_text,
 
-                notice_type=detection.get(
-                    "notice_type", ""
+                notice_type=(
+                    detection.get("notice_category")
+                    or detection.get("notice_type")
+                    or ""
                 ),
 
                 confidence=confidence,
@@ -592,7 +621,7 @@ def save_document_pages(
                 status=Notice.Status.NEEDS_REVIEW
             )
 
-            NoticePage.objects.create(
+            notice_page = NoticePage.objects.create(
 
                 notice=notice,
 
@@ -615,10 +644,35 @@ def save_document_pages(
 
             summary["notices_created"] += 1
 
-            entity_count = save_notice_entities(
-                notice,
-                notice_result.get("fields")
-            )
+            if multilingual:
+
+                evidence, evidence_created = (
+                    save_extraction_evidence(
+                        notice_page,
+                        box,
+                        pipeline_version=pipeline_result.get(
+                            "pipeline_version",
+                            "multilingual_v1"
+                        ),
+                    )
+                )
+
+                if evidence_created:
+
+                    summary["evidence_created"] += 1
+
+                else:
+
+                    summary["evidence_skipped_existing"] += 1
+
+                entity_count = 0
+
+            else:
+
+                entity_count = save_notice_entities(
+                    notice,
+                    notice_result.get("fields")
+                )
 
             summary[
                 "entities_created"

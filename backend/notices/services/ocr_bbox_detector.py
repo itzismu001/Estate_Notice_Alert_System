@@ -9,7 +9,8 @@ from pytesseract import Output
 def extract_ocr_text_blocks(
     pdf_path,
     page_number,
-    scale=3
+    scale=3,
+    language="eng"
 ):
     """
     Extract OCR text lines with bounding-box
@@ -37,9 +38,10 @@ def extract_ocr_text_blocks(
 
         data = pytesseract.image_to_data(
             image,
-            lang="eng",
+            lang=language,
             config="--psm 3",
-            output_type=Output.DICT
+            output_type=Output.DICT,
+            timeout=120
         )
 
         lines = {}

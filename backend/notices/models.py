@@ -220,3 +220,72 @@ class NoticePage(models.Model):
 
     def __str__(self):
         return f"Notice {self.notice_id} - Document Page {self.document_page_id}"
+
+
+class NoticeExtractionEvidence(models.Model):
+
+    notice_page = models.ForeignKey(
+        NoticePage,
+        on_delete=models.CASCADE,
+        related_name="extraction_evidence"
+    )
+
+    schema_version = models.CharField(
+        max_length=30,
+        default="1.0"
+    )
+
+    pipeline_version = models.CharField(
+        max_length=50
+    )
+
+    language = models.CharField(
+        max_length=20,
+        blank=True
+    )
+
+    decision = models.CharField(
+        max_length=20,
+        choices=[
+            ("ACCEPT", "Accept"),
+            ("REVIEW", "Review"),
+        ]
+    )
+
+    notice_category = models.CharField(
+        max_length=100,
+        blank=True
+    )
+
+    payload = models.JSONField()
+
+    payload_hash = models.CharField(
+        max_length=64
+    )
+
+    created_at = models.DateTimeField(
+        auto_now_add=True
+    )
+
+    class Meta:
+
+        db_table = "notice_extraction_evidence"
+
+        ordering = ["-created_at"]
+
+        constraints = [
+            models.UniqueConstraint(
+                fields=[
+                    "notice_page",
+                    "payload_hash",
+                ],
+                name="unique_notice_page_evidence"
+            )
+        ]
+
+    def __str__(self):
+
+        return (
+            f"Evidence {self.pk} - "
+            f"NoticePage {self.notice_page_id}"
+        )

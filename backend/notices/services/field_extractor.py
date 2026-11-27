@@ -119,7 +119,7 @@ IDENTIFIER_LABELS = {
 
 # Identifiers must contain a numeric component.
 IDENTIFIER_VALUE = (
-    r"[A-Za-z]?\d+"
+    r"(?:[A-Za-z]{1,5}-)?[A-Za-z]?\d+"
     r"(?:[/-][A-Za-z0-9]+)*"
     r"[A-Za-z]?"
 )
@@ -454,9 +454,344 @@ def extract_response_deadline(text):
 # MAIN STRUCTURED FIELD EXTRACTOR
 # ==================================================
 
-def extract_notice_fields(text):
+
+# ==================================================
+# OCR TEXT PREPROCESSING
+# ==================================================
+
+def preprocess_notice_text(text):
 
     text = text or ""
+
+    # Normalize line endings.
+    text = text.replace("\r\n", "\n")
+    text = text.replace("\r", "\n")
+
+    # Remove common OCR border artifacts.
+    text = re.sub(
+        r"[|{}]+[ \t]*(?=\n|$)",
+        "",
+        text
+    )
+
+    # Repair selected broken words.
+    broken_words = {
+        r"\bsit-\s*\nuated\b": "situated",
+        r"\bmeasur-\s*\ning\b": "measuring",
+        r"\binher-\s*\nitance\b": "inheritance",
+        r"\bregis-\s*\ntered\b": "registered",
+        r"\bfail-\s*\ning\b": "failing",
+        r"\bmis-\s*\nplaced\b": "misplaced",
+    }
+
+    for pattern, replacement in broken_words.items():
+
+        text = re.sub(
+            pattern,
+            replacement,
+            text,
+            flags=re.IGNORECASE
+        )
+
+    # Correct noise only in explicit contexts.
+    corrections = {
+
+        # Correct a Roman numeral OCR error
+        # specifically within the Part-I address format.
+
+        r"\bPart[ \t]*-[ \t]*\|(?=[ \t]*[,;.)]|\s|$)": "Part-I",
+
+        r"\blagreed\b": "agreed",
+
+        r"\bicharges\b": "charges",
+
+        r"(\bwithin\s+\d+\s+)idays\b": r"\1days",
+    }
+
+    for pattern, replacement in corrections.items():
+
+        text = re.sub(
+            pattern,
+            replacement,
+            text,
+            flags=re.IGNORECASE
+        )
+
+    return text
+
+
+# ==================================================
+# PROPERTY BEARING NUMBERS
+# ==================================================
+
+def extract_bearing_numbers(text):
+
+    values = []
+
+    pattern = (
+        r"\bbearing\s+"
+        r"(?:property\s+)?"
+        r"(?:nos?\.?|numbers?)"
+        r"\s*[:\-]?\s*"
+        r"(" + IDENTIFIER_VALUE + r")"
+    )
+
+    for match in re.finditer(
+        pattern,
+        text,
+        re.IGNORECASE
+    ):
+
+        # Require nearby property context.
+        preceding = text[
+            max(0, match.start() - 350):
+            match.start()
+        ]
+
+        if not re.search(
+            r"\b(?:property|land|premises|"
+            r"building|floor|plot|site|house)\b",
+            preceding,
+            re.IGNORECASE
+        ):
+            continue
+
+        # Do not treat deed references as
+        # property numbers.
+
+        if re.search(
+            r"(?:deed|document|registration)"
+            r"[^.!?\n]{0,45}$",
+            preceding,
+            re.IGNORECASE
+        ):
+            continue
+
+        values.append(match.group(1))
+
+    return unique_values(values)
+
+
+# ==================================================
+# REAL-WORLD OWNER NAME EXTRACTION
+# ==================================================
+
+def extract_named_owners(text):
+
+    clean_text = re.sub(r"\s+", " ", text)
+
+    owner_section = re.search(
+
+        r"\bowners?\s+namely\s*[:\-]?\s*"
+
+        r"(.+?)"
+
+        r"(?=\(\s*say\s+owners?\s*\)"
+        r"|,\s*free\s+from"
+        r"|,\s*residing"
+        r"|both\s+resident"
+        r"|any\s+other\s+person"
+        r"|$)",
+
+        clean_text,
+        re.IGNORECASE
+    )
+
+    if not owner_section:
+        return None
+
+    section = owner_section.group(1)
+
+    pattern = (
+
+        r"(?:^|,|\band\b|\(\s*[ivx\d]+\s*\))"
+
+        r"\s*['\"]?\s*"
+
+        r"(?:Shri|Sri|Smt\.?|Mr\.?|Mrs\.?|Ms\.?)"
+
+        r"\s+['\"]?"
+
+        r"([A-Za-z][A-Za-z .'-]*?)"
+
+        r"\s*(?=(?:S|D|W)\s*/\s*o\b)"
+    )
+
+    matches = re.findall(
+        pattern,
+        section,
+        re.IGNORECASE
+    )
+
+    names = unique_values(matches)
+
+    return names or None
+
+
+# ==================================================
+# PROPERTY ADDRESS EXTRACTION
+# ==================================================
+
+def extract_property_address(text):
+
+    pattern = (
+
+        r"\bsituated\s+(?:at|in)\s+"
+
+        r"(.+?)"
+
+        r"(?=\s*\("
+        r"|,\s*measuring\b"
+        r"|\s+measuring\b"
+        r"|,\s*from\b"
+        r"|\s+from\s+(?:its|the)\b"
+        r"|;\s*"
+        r"|$)"
+    )
+
+    match = re.search(
+        pattern,
+        text,
+        re.IGNORECASE | re.DOTALL
+    )
+
+    if not match:
+        return None
+
+    value = re.sub(
+        r"\s+",
+        " ",
+        match.group(1)
+    ).strip(" ,.")
+
+    # Avoid capturing a large portion of the
+    # notice when address boundaries are unclear.
+
+    if len(value) > 250:
+        return None
+
+    return value or None
+
+
+# ==================================================
+# PROPERTY AREA AND LAND SHARE
+# ==================================================
+
+def extract_property_area(text):
+
+    pattern = (
+
+        r"\bmeasuring\s+"
+
+        r"(\d[\d,]*(?:\.\d+)?)\s*"
+
+        r"(sq\.?\s*(?:yds?\.?|yards?|"
+        r"ft\.?|feet|mtrs?\.?|metres?|meters?)"
+        r"|square\s+(?:yards?|feet|metres?|meters?)"
+        r"|acres?|guntas?|hectares?)\b"
+    )
+
+    match = re.search(
+        pattern,
+        text,
+        re.IGNORECASE
+    )
+
+    if not match:
+        return None, None
+
+    value = match.group(1)
+
+    unit = re.sub(
+        r"[\s.]",
+        "",
+        match.group(2).lower()
+    )
+
+    unit_mapping = {
+        "sqyd": "square_yards",
+        "sqyds": "square_yards",
+        "sqyard": "square_yards",
+        "sqyards": "square_yards",
+        "squareyard": "square_yards",
+        "squareyards": "square_yards",
+        "sqft": "square_feet",
+        "sqfeet": "square_feet",
+        "squarefeet": "square_feet",
+        "sqmtr": "square_metres",
+        "sqmtrs": "square_metres",
+        "sqmetre": "square_metres",
+        "sqmetres": "square_metres",
+        "sqmeter": "square_metres",
+        "sqmeters": "square_metres",
+        "squaremetre": "square_metres",
+        "squaremetres": "square_metres",
+        "squaremeter": "square_metres",
+        "squaremeters": "square_metres",
+        "acre": "acres",
+        "acres": "acres",
+        "gunta": "guntas",
+        "guntas": "guntas",
+        "hectare": "hectares",
+        "hectares": "hectares",
+    }
+
+    return value, unit_mapping.get(unit, unit)
+
+
+def extract_land_share(text):
+
+    return find_value([
+
+        r"(\d+(?:\.\d+)?)\s*%\s*"
+        r"undivided\s+share"
+
+    ], text)
+
+
+# ==================================================
+# REGISTRATION AND SALE DEED DETAILS
+# ==================================================
+
+def extract_registration_numbers(text):
+
+    return extract_identifiers(
+
+        text,
+
+        r"registration\s*(?:numbers?|nos?\.?)"
+    )
+
+
+def extract_sale_deed_date(text):
+
+    return find_value([
+
+        r"\bsale\s+deed\s+dated\s*("
+        + DATE_PATTERN + r")"
+
+    ], text)
+
+
+# ==================================================
+# EXTENDED ADVOCATE EXTRACTION
+# ==================================================
+
+def extract_parenthesized_advocate(text):
+
+    return find_value([
+
+        r"(?:^|\n)[ \t]*"
+        r"([A-Za-z][A-Za-z .'-]{2,60}?)"
+        r"[ \t]*\(\s*advocate\s*\)"
+
+    ], text)
+
+
+
+def extract_notice_fields(text):
+
+    text = preprocess_notice_text(text)
 
     identifiers = {}
 
@@ -471,6 +806,11 @@ def extract_notice_fields(text):
             )
         )
 
+    identifiers["property_numbers"] = unique_values(
+        identifiers["property_numbers"]
+        + extract_bearing_numbers(text)
+    )
+
     identifiers["khasra_numbers"] = (
         extract_khasra_numbers(text)
     )
@@ -479,12 +819,19 @@ def extract_notice_fields(text):
         extract_response_deadline(text)
     )
 
+    area, area_unit = extract_property_area(text)
+
+    registration_numbers = extract_registration_numbers(text)
+
     # Preserve existing scalar fields for
     # compatibility with the current pipeline.
 
     fields = {
 
-        "party_names": find_party_names(text),
+        "party_names": (
+            extract_named_owners(text)
+            or find_party_names(text)
+        ),
 
         "village": extract_location(
             text,
@@ -566,7 +913,26 @@ def extract_notice_fields(text):
 
         "response_deadline_unit": deadline_unit,
 
-        "advocate_name": find_advocate_name(text),
+        "advocate_name": (
+            extract_parenthesized_advocate(text)
+            or find_advocate_name(text)
+        ),
+
+        "property_address": extract_property_address(text),
+
+        "property_area": area,
+
+        "property_area_unit": area_unit,
+
+        "land_share_percentage": extract_land_share(text),
+
+        "registration_number": first_value(
+            registration_numbers
+        ),
+
+        "registration_numbers": registration_numbers,
+
+        "sale_deed_date": extract_sale_deed_date(text),
 
     }
 
