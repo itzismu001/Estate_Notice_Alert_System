@@ -1,6 +1,8 @@
 from datetime import date
 from celery import shared_task
 
+from documents.services.processing_dispatcher import dispatch_document_processing
+
 from collection.models import CollectionRun
 from collection.services.collection_runner import execute_collection_run
 from sources.models import Source
@@ -42,6 +44,9 @@ def execute_collection_run_task(self, collection_run_id, pdf_list):
         collection_run,
         prepared_pdf_list
     )
+
+    for record in result.run_documents.all():
+        dispatch_document_processing(record.document_id)
 
     return {
         "collection_run_id": result.id,
@@ -89,6 +94,8 @@ def fetch_and_register_indupaper_daily():
             publication_date=today,
             source_url=URL,
         )
+
+        dispatch_document_processing(document.id)
 
         # Mark collection as successful
         collection_run.status = CollectionRun.Status.COMPLETED

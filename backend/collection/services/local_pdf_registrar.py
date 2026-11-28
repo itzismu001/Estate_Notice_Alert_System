@@ -1,5 +1,7 @@
 import hashlib
 import os
+import shutil
+import tempfile
 from pathlib import Path
 
 from django.conf import settings
@@ -99,7 +101,19 @@ def register_local_pdf(
 
         try:
             if not final_path.exists():
-                os.replace(local_pdf_path, final_path)
+                with tempfile.NamedTemporaryFile(
+                    dir=storage_directory,
+                    prefix=".register-",
+                    suffix=".part",
+                    delete=False,
+                ) as temporary_file:
+                    temporary_path = Path(temporary_file.name)
+
+                try:
+                    shutil.copyfile(local_pdf_path, temporary_path)
+                    os.replace(temporary_path, final_path)
+                finally:
+                    temporary_path.unlink(missing_ok=True)
                 file_created = True
 
             document = SourceDocument.objects.create(
