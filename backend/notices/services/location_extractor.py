@@ -217,6 +217,21 @@ def extract_suffix_locations(
 
                 continue
 
+        # Prevent a prefix value from being assigned
+        # to the next English location label.
+        if match.group(2).isascii():
+
+            prefix_matches = find_english_prefix_locations(
+                text
+            )
+
+            if any(
+                item["_value_start"] <= match.start(1)
+                < item["_value_end"]
+                for item in prefix_matches
+            ):
+                continue
+
         name = match.group(1).strip(".")
 
         label = match.group(2)
@@ -293,68 +308,173 @@ def extract_suffix_locations(
 # EXTRACT EXPLICIT ENGLISH LOCATION LABELS
 # ==================================================
 
-def extract_prefix_locations(text, field):
+def find_english_prefix_locations(text):
 
     evidence = []
 
-    label = field.replace("_", " ")
+    english_labels = {
+        label.casefold(): field
+        for field, labels in LOCATION_LABELS.items()
+        for label in labels
+        if label.isascii()
+    }
 
-    pattern = (
-
-        r"\b"
-
-        + re.escape(label)
-
-        + r"\s*:\s*"
-
-        + r"(" + PLACE_TOKEN
-
-        + r"(?:\s+" + PLACE_TOKEN + r"){0,3})"
+    alternatives = "|".join(
+        re.escape(label)
+        for label in sorted(
+            english_labels,
+            key=len,
+            reverse=True
+        )
     )
 
-    for match in re.finditer(
-        pattern,
-        text,
+    label_pattern = re.compile(
+        r"\b(" + alternatives + r")\b"
+        r"(\s*:\s*|\s+)",
         re.IGNORECASE
-    ):
+    )
 
-        value = match.group(1).strip()
+    stop_words = STOP_WORDS | {
+        "raise", "objection", "objections",
+        "within", "days", "notice", "public",
+        "survey", "plot", "site", "khata",
+        "pid", "ward", "pin", "code",
+        "measuring", "measurement",
+        "bounded", "boundaries",
+        "advocate", "office", "court",
+        "schedule", "owner", "claim",
+        "claims", "hereby", "having",
+        "belonging", "located"
+    }
 
-        tokens = value.split()
+    label_words = {
+        word
+        for label in english_labels
+        for word in label.split()
+    }
 
-        cleaned = []
+    previous_end = None
 
-        for token in tokens:
+    for match in label_pattern.finditer(text):
 
-            if token.casefold() in STOP_WORDS:
+        label = match.group(1)
+        field = english_labels[label.casefold()]
 
-                break
+        before = text[:match.start()].rstrip()
 
-            cleaned.append(token)
+        explicit_colon = ":" in match.group(2)
 
-        value = " ".join(cleaned)
+        follows_prefix = (
+            previous_end is not None
+            and not text[
+                previous_end:match.start()
+            ].strip()
+        )
 
-        if not value:
+        starts_context = (
+            not before
+            or before[-1].isdigit()
+            or before[-1] in ",;:("
+        )
 
+        if not (
+            explicit_colon
+            or follows_prefix
+            or starts_context
+        ):
             continue
 
+        value_start = match.end()
+        cursor = value_start
+        value_end = value_start
+        tokens = []
+
+        for _ in range(4):
+
+            token_match = re.match(
+                PLACE_TOKEN,
+                text[cursor:]
+            )
+
+            if not token_match:
+                break
+
+            token = token_match.group()
+            cleaned = token.strip(".")
+            key = cleaned.casefold()
+
+            if (
+                key in stop_words
+                or key in label_words
+                or not cleaned
+            ):
+                break
+
+            # Without an explicit colon, use a
+            # conservative English place-name heuristic.
+            if not explicit_colon:
+                if not (
+                    cleaned[0].isupper()
+                    or key in DIRECTION_WORDS
+                ):
+                    break
+
+            tokens.append(cleaned)
+
+            value_end = (
+                cursor + token_match.end()
+            )
+
+            if token.endswith("."):
+                break
+
+            whitespace = re.match(
+                r"\s+",
+                text[value_end:]
+            )
+
+            if not whitespace:
+                break
+
+            cursor = (
+                value_end + whitespace.end()
+            )
+
+        if not tokens:
+            continue
+
+        value = " ".join(tokens)
+
         evidence.append({
-
             "field": field,
-
             "value": value,
-
             "label": label,
-
             "source_text": text[
                 max(0, match.start() - 30):
-                min(len(text), match.end() + 30)
+                min(len(text), value_end + 30)
             ],
-
-            "verified": False
+            "verified": False,
+            "_label_start": match.start(),
+            "_value_start": value_start,
+            "_value_end": value_end
         })
 
+        previous_end = value_end
+
     return evidence
+
+
+def extract_prefix_locations(text, field):
+
+    return [
+        {
+            key: value
+            for key, value in item.items()
+            if not key.startswith("_")
+        }
+        for item in find_english_prefix_locations(text)
+        if item["field"] == field
+    ]
 
 
 # ==================================================
