@@ -279,4 +279,3 @@ def process_pdf(
         "total_notices": total_notices,
 
     }
-

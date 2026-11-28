@@ -941,4 +941,3 @@ def extract_notice_fields(text):
     fields.update(identifiers)
 
     return fields
-
