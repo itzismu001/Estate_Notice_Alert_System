@@ -8,6 +8,10 @@ from documents.models import SourceDocument, ProcessingJob
 from documents.services.pipeline import process_pdf
 from documents.services.database_saver import save_document_pages
 
+from documents.services.processing_retry import (
+    get_processing_retry_state,
+)
+
 
 def resolve_document_path(document):
     media_root = Path(settings.MEDIA_ROOT).resolve()
@@ -55,11 +59,33 @@ def execute_document_processing(document_id, task_id=""):
         ):
             raise ValueError("Document is not ready for processing")
 
+        retry_state = get_processing_retry_state(document)
+
+        if not retry_state["allowed"]:
+
+            if retry_state["reason"] == "maximum_retries_reached":
+                document.status = SourceDocument.Status.FAILED
+                document.save(
+                    update_fields=["status", "updated_at"]
+                )
+
+            return {
+                "document_id": document.id,
+                "status": document.status,
+                "skipped": True,
+                "reason": retry_state["reason"],
+                "retry_count": retry_state["retry_count"],
+                "max_retries": retry_state["max_retries"],
+                "eligible_for_alert": False,
+            }
+
         job = ProcessingJob.objects.create(
             document=document,
             job_type=ProcessingJob.JobType.NOTICE_DETECTION,
             status=ProcessingJob.Status.RUNNING,
             celery_task_id=task_id or "",
+            retry_count=retry_state["retry_count"],
+            max_retries=retry_state["max_retries"],
             started_at=timezone.now(),
         )
 

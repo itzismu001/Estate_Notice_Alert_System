@@ -5,6 +5,10 @@ from django.db import transaction
 from documents.models import SourceDocument
 from documents.tasks import process_source_document_task
 
+from documents.services.processing_retry import (
+    get_processing_retry_state,
+)
+
 
 logger = logging.getLogger(__name__)
 
@@ -16,6 +20,16 @@ def dispatch_document_processing(document_id):
     )
 
     if document.status != SourceDocument.Status.DOWNLOADED:
+        return False
+
+    retry_state = get_processing_retry_state(document)
+
+    if not retry_state["allowed"]:
+        logger.warning(
+            "Processing dispatch blocked for document %s: %s",
+            document_id,
+            retry_state["reason"],
+        )
         return False
 
     def submit_task():
